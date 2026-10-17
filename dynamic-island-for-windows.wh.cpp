@@ -6,7 +6,7 @@
 // @author          Himanshu
 // @github          https://github.com/devcode90
 // @include         windhawk.exe
-// @compilerOptions -lole32 -loleaut32 -lshcore -ld2d1 -ldwrite -ldwmapi -lgdi32 -luser32 -lshell32 -lruntimeobject -lwindowscodecs -lavrt -lsetupapi -lwinhttp -lpdh -lwinmm
+// @compilerOptions -lole32 -loleaut32 -lshcore -ld2d1 -ldwrite -ldwmapi -lgdi32 -luser32 -lshell32 -lruntimeobject -lwindowscodecs -lavrt -lsetupapi -lwinhttp -lpdh -lwinmm -limm32
 // @license         MIT
 // ==/WindhawkMod==
 
@@ -373,6 +373,9 @@ We love community contributions! To ensure high-quality updates, please follow t
   - CapsLock: true
     $name: Caps Lock module
     $description: Shows an indicator when Caps Lock or Num Lock state changes.
+  - ImeIndicator: true
+    $name: Chinese input mode indicator
+    $description: Shows 中 or 英 when you press Shift to switch a Chinese IME (e.g. Microsoft Bopomofo or Pinyin) between Chinese and English input.
   - Battery: true
     $name: Battery module
     $description: Shows an alert when your laptop battery is running low.
@@ -572,6 +575,7 @@ We love community contributions! To ensure high-quality updates, please follow t
 #include <unknwn.h>
 #include <dwmapi.h>
 #include <shellapi.h>
+#include <imm.h>
 #include <ole2.h>
 #include <shlobj.h>
 #include <setupapi.h>
@@ -948,6 +952,7 @@ enum class IslandKind {
     Brightness,
     BatteryLow,
     CapsLock,
+    Ime,
     Device,
     Bluetooth,
     Timer,
@@ -1158,6 +1163,7 @@ struct Settings {
     // The activity gate is the one that actually hides the pill; the others stop
     // the work leading up to it.
     bool capsLock = true;
+    bool imeIndicator = true;
     bool timerEnabled = true;
     bool hideShowHotkeyEnabled = true;
     UINT hideShowModifiers = MOD_CONTROL | MOD_ALT | MOD_NOREPEAT;
@@ -1365,6 +1371,12 @@ struct CapsLockSnapshot {
     bool capsOn = false;
     bool numOn = false;
     bool isNumEvent = false;
+    double expiresAt = 0.0;
+};
+
+struct ImeSnapshot {
+    bool active = false;
+    bool native = false;  // Chinese input (IME_CMODE_NATIVE) vs English
     double expiresAt = 0.0;
 };
 
@@ -1582,6 +1594,7 @@ struct SharedState {
     VolumeSnapshot volume;
     BrightnessSnapshot brightness;
     CapsLockSnapshot capsLock;
+    ImeSnapshot ime;
     TimerSnapshot timer;
     DeviceSnapshot device;
     BluetoothDeviceSnapshot bluetoothDevice;
@@ -2079,6 +2092,8 @@ const wchar_t* Loc(const wchar_t* english) {
         {L"Connected", {nullptr, L"Connecté", L"Conectado", L"Verbunden", L"Conectado", L"Connesso", L"Подключено", L"Bağlandı", L"कनेक्ट किया गया", L"已连接", L"接続済み", L"연결됨"}},
         {L"Disconnected", {nullptr, L"Déconnecté", L"Desconectado", L"Getrennt", L"Desconectado", L"Disconnesso", L"Отключено", L"Bağlantı kesildi", L"डिस्कनेक्ट किया गया", L"已断开", L"切断されました", L"연결 끊김"}},
         {L"Caps Lock", {nullptr, L"Verr. Maj", L"Bloq Mayús", L"Feststelltaste", L"Caps Lock", L"Blocco maiuscole", L"Caps Lock", L"Caps Lock", L"कैप्स लॉक", L"大写锁定", L"Caps Lock", L"Caps Lock"}},
+        {L"Chinese", {nullptr, L"Chinois", L"Chino", L"Chinesisch", L"Chinês", L"Cinese", L"Китайский", L"Çince", L"चीनी", L"中文", L"中国語", L"중국어"}},
+        {L"English", {nullptr, L"Anglais", L"Inglés", L"Englisch", L"Inglês", L"Inglese", L"Английский", L"İngilizce", L"अंग्रेज़ी", L"英文", L"英語", L"영어"}},
         {L"Num Lock", {nullptr, L"Verr. Num", L"Bloq Num", L"Num-Taste", L"Num Lock", L"Blocco num", L"Num Lock", L"Num Lock", L"नम लॉक", L"数字锁定", L"Num Lock", L"Num Lock"}},
         {L"On", {nullptr, L"Activé", L"Activado", L"Ein", L"Ligado", L"Attivo", L"Вкл", L"Açık", L"चालू", L"开", L"オン", L"켜짐"}},
         {L"Off", {nullptr, L"Désactivé", L"Desactivado", L"Aus", L"Desligado", L"Disattivo", L"Выкл", L"Kapalı", L"बंद", L"关", L"オフ", L"꺼짐"}},
@@ -2877,6 +2892,7 @@ void LoadSettings() {
     next.battery = Wh_GetIntSetting(L"Modules.Battery") != 0;
     next.progress = Wh_GetIntSetting(L"Modules.Progress") != 0;
     next.capsLock = Wh_GetIntSetting(L"Modules.CapsLock") != 0;
+    next.imeIndicator = Wh_GetIntSetting(L"Modules.ImeIndicator") != 0;
     next.timerEnabled = Wh_GetIntSetting(L"Modules.TimerModule") != 0;
 
     next.hideShowHotkeyEnabled = Wh_GetIntSetting(L"Shortcuts.HideShowHotkeyEnabled") != 0;
@@ -3310,7 +3326,8 @@ void LoadSettings() {
     {
         std::lock_guard lock(g_settingsMutex);
         cityChanged = next.weatherCity != g_settings.weatherCity;
-        capsLockChanged = next.capsLock != g_settings.capsLock;
+        capsLockChanged = next.capsLock != g_settings.capsLock ||
+                          next.imeIndicator != g_settings.imeIndicator;
         hotkeySettingChanged =
             next.hideShowHotkeyEnabled != g_settings.hideShowHotkeyEnabled ||
             next.hideShowModifiers != g_settings.hideShowModifiers ||
@@ -10855,6 +10872,7 @@ void DismissTransientState() {
     g_state.brightness.active = false;
     g_state.progress.active = false;
     g_state.capsLock.active = false;
+    g_state.ime.active = false;
     g_state.device.active = false;
     g_state.bluetoothDevice.active = false;
     g_state.battery.active = false;
@@ -12514,6 +12532,9 @@ class Renderer {
                 break;
             case IslandKind::CapsLock:
                 DrawCapsLock(state, unscaledRect);
+                break;
+            case IslandKind::Ime:
+                DrawIme(state, unscaledRect);
                 break;
             case IslandKind::Device:
                 DrawDevice(state, unscaledRect);
@@ -19283,6 +19304,31 @@ class Renderer {
         }
     }
 
+    void DrawIme(const SharedState& state, D2D1_RECT_F rect) {
+        if (rect.bottom - rect.top < 24.0f || rect.right - rect.left < 100.0f) return;
+        const float cy = (rect.top + rect.bottom) * 0.5f;
+        const float badgeSz = (rect.bottom - rect.top) - 16.0f;
+        D2D1_RECT_F badge = D2D1::RectF(rect.left + 14, cy - badgeSz * 0.5f,
+                                        rect.left + 14 + badgeSz, cy + badgeSz * 0.5f);
+        const float br = badgeSz * 0.35f;
+
+        ComPtr<ID2D1SolidColorBrush> badgeBg;
+        target_->CreateSolidColorBrush(material_.raisedStrong, &badgeBg);
+        target_->FillRoundedRectangle(D2D1::RoundedRect(badge, br, br), badgeBg.Get());
+
+        const wchar_t* glyph = state.ime.native ? L"中" : L"英";
+        textBrush_->SetOpacity(0.95f);
+        target_->DrawTextW(glyph, static_cast<UINT32>(wcslen(glyph)), clockFormat_.Get(), badge,
+                           textBrush_.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+
+        const std::wstring label = Loc(state.ime.native ? L"Chinese" : L"English");
+        const float tx = badge.right + 14.0f;
+        D2D1_RECT_F labelRect = D2D1::RectF(tx, cy - 9.0f, rect.right - 14.0f, cy + 11.0f);
+        target_->DrawTextW(label.c_str(), static_cast<UINT32>(label.size()),
+                           textFormat_.Get(), labelRect, textBrush_.Get(),
+                           D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+
     void DrawDevice(const SharedState& state, D2D1_RECT_F rect) {
         if (rect.bottom - rect.top < 24.0f || rect.right - rect.left < 100.0f) return;
         const float cy = (rect.top + rect.bottom) * 0.5f;
@@ -20529,6 +20575,10 @@ Activity ActivityForKind(IslandKind kind, const Settings& settings, const Shared
             activity.width = 180.0f;
             activity.height = 42.0f;
             break;
+        case IslandKind::Ime:
+            activity.width = 150.0f;
+            activity.height = 42.0f;
+            break;
         case IslandKind::Device:
             activity.width = 240.0f;
             activity.height = 50.0f;
@@ -20590,6 +20640,9 @@ std::vector<IslandKind> ChooseActivities(const SharedState& state, const Setting
     if (settings.capsLock && state.capsLock.active && now < state.capsLock.expiresAt) {
         activities.push_back(IslandKind::CapsLock);
     }
+    if (settings.imeIndicator && state.ime.active && now < state.ime.expiresAt) {
+        activities.push_back(IslandKind::Ime);
+    }
     if (state.device.active && now < state.device.expiresAt) {
         activities.push_back(IslandKind::Device);
     }
@@ -20633,6 +20686,10 @@ std::vector<IslandKind> ChooseActivities(const SharedState& state, const Setting
 }
 
 constexpr UINT WM_APP_CAPSLOCK = WM_APP + 0x444;
+constexpr UINT WM_APP_IME_TOGGLE = WM_APP + 0x445;
+constexpr UINT_PTR kImeQueryTimerId = 0x494D;
+constexpr WPARAM kImcGetConversionMode = 0x0001;  // IMC_GETCONVERSIONMODE, missing from MinGW's imm.h
+constexpr WPARAM kImcGetOpenStatus = 0x0005;      // IMC_GETOPENSTATUS
 HHOOK g_keyboardHook = nullptr;
 HANDLE g_keyboardThread = nullptr;
 DWORD g_keyboardThreadId = 0;
@@ -20649,10 +20706,34 @@ DWORD g_keyboardThreadId = 0;
 //
 // The WM_APP_CAPSLOCK handler writes exactly the same fields on the window
 // thread, after checking the setting. Nothing is lost by only posting.
+// A lone Shift press (down then up with no other key between) is what toggles a
+// Chinese IME between Chinese and English input, so only that pattern is posted.
+bool g_loneShiftPending = false;
+
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION) {
+        auto* kbd = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+        const bool isShift = kbd->vkCode == VK_LSHIFT || kbd->vkCode == VK_RSHIFT ||
+                             kbd->vkCode == VK_SHIFT;
+        if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
+            if (!isShift) {
+                g_loneShiftPending = false;
+            } else if (!g_loneShiftPending &&
+                       (GetAsyncKeyState(VK_CONTROL) & 0x8000) == 0 &&
+                       (GetAsyncKeyState(VK_MENU) & 0x8000) == 0 &&
+                       (GetAsyncKeyState(VK_LWIN) & 0x8000) == 0 &&
+                       (GetAsyncKeyState(VK_RWIN) & 0x8000) == 0) {
+                g_loneShiftPending = true;
+            }
+        } else if ((wParam == WM_KEYUP || wParam == WM_SYSKEYUP) && isShift) {
+            if (g_loneShiftPending) {
+                g_loneShiftPending = false;
+                if (HWND hwnd = g_hwnd) {
+                    PostMessageW(hwnd, WM_APP_IME_TOGGLE, 0, 0);
+                }
+            }
+        }
         if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
-            auto* kbd = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
             if (kbd->vkCode == VK_CAPITAL || kbd->vkCode == VK_NUMLOCK) {
                 const bool capsOn = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
                 const bool numOn = (GetKeyState(VK_NUMLOCK) & 0x0001) != 0;
@@ -20668,10 +20749,36 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 // A system-wide WH_KEYBOARD_LL puts this process on the path of every keystroke
 // on the desktop, so it is only installed while it has something to report. The
-// hook exists solely to notice Caps Lock and Num Lock for the indicator pill;
-// with that module off it was still running for nothing.
+// hook exists solely to notice Caps Lock / Num Lock and the Shift that toggles a
+// Chinese IME; with both modules off it was still running for nothing.
 static bool CapsLockHookWanted() {
-    return g_settings.capsLock;
+    return g_settings.capsLock || g_settings.imeIndicator;
+}
+
+// Returns 1 for Chinese input, 0 for English, -1 when the foreground window has no
+// readable Chinese IME (other layouts, IME closed, the taskbar, a hung app).
+int QueryForegroundImeNative() {
+    HWND fg = GetForegroundWindow();
+    if (!fg) return -1;
+    wchar_t cls[32] = {};
+    GetClassNameW(fg, cls, ARRAYSIZE(cls));
+    if (wcscmp(cls, L"Shell_TrayWnd") == 0) return -1;
+    const DWORD tid = GetWindowThreadProcessId(fg, nullptr);
+    const LANGID lang = LOWORD(reinterpret_cast<UINT_PTR>(GetKeyboardLayout(tid)));
+    if (PRIMARYLANGID(lang) != LANG_CHINESE) return -1;
+    HWND imeWnd = ImmGetDefaultIMEWnd(fg);
+    if (!imeWnd) return -1;
+    DWORD_PTR open = 0;
+    DWORD_PTR mode = 0;
+    if (!SendMessageTimeoutW(imeWnd, WM_IME_CONTROL, kImcGetOpenStatus, 0,
+                             SMTO_ABORTIFHUNG, 100, &open) || !open) {
+        return -1;
+    }
+    if (!SendMessageTimeoutW(imeWnd, WM_IME_CONTROL, kImcGetConversionMode, 0,
+                             SMTO_ABORTIFHUNG, 100, &mode)) {
+        return -1;
+    }
+    return (mode & IME_CMODE_NATIVE) ? 1 : 0;
 }
 
 // Wakes the keyboard thread so it re-evaluates whether the hook is needed.
@@ -21612,6 +21719,31 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             TriggerNudge();
             return 0;
         }
+
+        case WM_APP_IME_TOGGLE:
+            // The IME flips its mode only after the Shift key-up reaches the
+            // foreground app, which is after this hook saw it, so read a moment later.
+            if (g_settings.imeIndicator) {
+                SetTimer(hwnd, kImeQueryTimerId, 80, nullptr);
+            }
+            return 0;
+
+        case WM_TIMER:
+            if (wParam == kImeQueryTimerId) {
+                KillTimer(hwnd, kImeQueryTimerId);
+                const int native = QueryForegroundImeNative();
+                if (native >= 0 && g_settings.imeIndicator) {
+                    {
+                        std::lock_guard lock(g_stateMutex);
+                        g_state.ime.active = true;
+                        g_state.ime.native = native == 1;
+                        g_state.ime.expiresAt = NowSeconds() + 1.5;
+                    }
+                    TriggerNudge();
+                }
+                return 0;
+            }
+            break;
 
         case WM_DEVICECHANGE: {
             // DBT_DEVICEARRIVAL = 0x8000, DBT_DEVICEREMOVECOMPLETE = 0x8004
@@ -22625,6 +22757,10 @@ DWORD WINAPI RenderThreadProc(void*) {
                 g_state.capsLock.active = false;
                 snapshot.capsLock.active = false;
             }
+            if (g_state.ime.active && now >= g_state.ime.expiresAt) {
+                g_state.ime.active = false;
+                snapshot.ime.active = false;
+            }
             if (g_state.battery.active && now >= g_state.battery.expiresAt) {
                 g_state.battery.active = false;
                 snapshot.battery.active = false;
@@ -22727,6 +22863,7 @@ DWORD WINAPI RenderThreadProc(void*) {
                                  primary.kind == IslandKind::Brightness ||
                                  primary.kind == IslandKind::BatteryLow ||
                                  primary.kind == IslandKind::CapsLock ||
+                                 primary.kind == IslandKind::Ime ||
                                  primary.kind == IslandKind::Device ||
                                  primary.kind == IslandKind::Bluetooth ||
                                  primary.kind == IslandKind::DoNotDisturb ||
