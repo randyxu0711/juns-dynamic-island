@@ -1,4 +1,6 @@
-# 🏝️ Dynamic Island for Windows
+# 🏝️ Jun's Dynamic Island
+
+> A personal fork of [Dynamic Island for Windows](https://github.com/devcode90/Dynamic-Island-for-Windows) by Himanshu (devcode90) and its contributors, released under the same [MIT License](LICENSE). Everything below describes the upstream project unless noted otherwise.
 
 A smooth, interactive overlay for your desktop, inspired by Apple's Dynamic Island. It brings a sleek media widget, notifications, and system alerts to Windows without slowing down your PC.
 

@@ -1,10 +1,10 @@
 // ==WindhawkMod==
-// @id              dynamic-island-for-windows
-// @name            Dynamic Island for Windows
-// @description     A living, breathing pill overlay inspired by iPhone's Dynamic Island. Reacts to media, downloads, clipboard, battery, and more.
+// @id              juns-dynamic-island
+// @name            Jun's Dynamic Island
+// @description     Personal fork of Dynamic Island for Windows by Himanshu (devcode90). A living, breathing pill overlay inspired by iPhone's Dynamic Island.
 // @version         1.3.1
-// @author          Himanshu
-// @github          https://github.com/devcode90
+// @author          Randy Xu
+// @github          https://github.com/randyxu0711
 // @include         windhawk.exe
 // @compilerOptions -lole32 -loleaut32 -lshcore -ld2d1 -ldwrite -ldwmapi -lgdi32 -luser32 -lshell32 -lruntimeobject -lwindowscodecs -lavrt -lsetupapi -lwinhttp -lpdh -lwinmm
 // @license         MIT
@@ -12,7 +12,9 @@
 
 // ==WindhawkModReadme==
 /*
-# Dynamic Island for Windows
+# Jun's Dynamic Island
+
+A personal fork of [Dynamic Island for Windows](https://github.com/devcode90/Dynamic-Island-for-Windows) by Himanshu (devcode90) and its contributors, maintained at [randyxu0711/juns-dynamic-island](https://github.com/randyxu0711/juns-dynamic-island). All original features and credits below belong to the upstream project.
 
 A fluid, living overlay inspired by Apple's Dynamic Island, bringing a beautiful, highly-responsive UI to your Windows desktop. Built natively with hardware-accelerated Direct2D rendering for a buttery-smooth 60 FPS experience.
 
